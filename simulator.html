@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Belousov-Zhabotinsky Reaction Simulation</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255,255,255,0.9);
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 1000;
+            font-family: Arial, sans-serif;
+            cursor: move;
+            user-select: none;
+            border: 2px solid black;
+        }
+        #controls label {
+            display: block;
+            margin-bottom: 5px;
+            cursor: default;
+        }
+        #controls input[type="number"] {
+            width: 60px;
+            margin-left: 5px;
+            cursor: default;
+        }
+        #controls input[type="color"] {
+            width: 60px;
+            margin-left: 5px;
+            cursor: pointer;
+            border: none;
+            padding: 0;
+            background: none;
+        }
+        #controls input[type="range"] {
+            width: 150px;
+            vertical-align: middle;
+            cursor: pointer;
+        }
+        #controls button {
+            margin-top: 10px;
+            width: 150px;
+            cursor: pointer;
+        }
+        #colorPicker {
+            display: flex;
+            margin-top: 10px;
+        }
+        .colorOption {
+            width: 30px;
+            height: 30px;
+            margin-right: 5px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            box-sizing: border-box;
+        }
+        .colorOption.selected {
+            border-color: black;
+        }
+        .colorOption:hover {
+            opacity: 0.8;
+        }
+        #canvas {
+            display: block;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <label>
+            Dimension:
+            <input type="number" id="dimension" value="450" min="50" max="1000">
+        </label>
+        <label>
+            α (alfa):
+            <input type="number" id="alfa" value="1.0" step="0.1">
+        </label>
+        <label>
+            β (beta):
+            <input type="number" id="beta" value="1.0" step="0.1">
+        </label>
+        <label>
+            γ (gamma):
+            <input type="number" id="gamma" value="1.0" step="0.1">
+        </label>
+        <label>
+            Brush Size:
+            <input type="number" id="brushSize" value="1" min="1" max="20" step="1">
+        </label>
+        <label>
+            Speed: <span id="speedValue">0.5</span>
+            <input type="range" id="speed" min="0.1" max="1.0" value="0.5" step="0.05">
+        </label>
+        <!-- New Custom Color Inputs -->
+        <label>
+            Color A:
+            <input type="color" id="colorInputA" value="#0B0405">
+        </label>
+        <label>
+            Color B:
+            <input type="color" id="colorInputB" value="#357BA2">
+        </label>
+        <label>
+            Color C:
+            <input type="color" id="colorInputC" value="#DEF5E5">
+        </label>
+        <button id="startBtn">Start Simulation</button>
+        <button id="stopBtn">Stop Simulation</button>
+        <div id="colorPicker">
+            <div class="colorOption" id="colorA" title="Adjust 'a' component"></div>
+            <div class="colorOption" id="colorB" title="Adjust 'b' component"></div>
+            <div class="colorOption" id="colorC" title="Adjust 'c' component"></div>
+        </div>
+    </div>
+    <canvas id="canvas"></canvas>
+    <script>
+        // Make the DIV element draggable:
+        dragElement(document.getElementById("controls"));
+
+        function dragElement(elmnt) {
+            var pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+            var header = elmnt;
+            header.onmousedown = dragMouseDown;
+
+            function dragMouseDown(e) {
+                e = e || window.event;
+                // If the target is an input, button, or label, don't start dragging
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON' || e.target.tagName === 'LABEL' || e.target.classList.contains('colorOption')) {
+                    return;
+                }
+                e.preventDefault();
+                // Get the mouse cursor position at startup:
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                document.onmouseup = closeDragElement;
+                document.onmousemove = elementDrag;
+            }
+
+            function elementDrag(e) {
+                e = e || window.event;
+                e.preventDefault();
+                pos1 = pos3 - e.clientX;
+                pos2 = pos4 - e.clientY;
+                pos3 = e.clientX;
+                pos4 = e.clientY;
+                elmnt.style.top = (elmnt.offsetTop - pos2) + "px";
+                elmnt.style.left = (elmnt.offsetLeft - pos1) + "px";
+            }
+
+            function closeDragElement() {
+                document.onmouseup = null;
+                document.onmousemove = null;
+            }
+        }
+
+        // Simulation code
+
+        class RandomGenerator {
+            constructor() {
+                this.a = Math.pow(7, 5);
+                this.dosE31menos1 = Math.pow(2, 31) - 1;
+                this.q = Math.floor(this.dosE31menos1 / this.a);
+                this.r = this.dosE31menos1 % this.a;
+                this.dosE31menos1Double = 2147483647.0;
+            }
+
+            fishman_moore1(semilla) {
+                const m = 48271;
+                return (m * semilla) % this.dosE31menos1;
+            }
+
+            fishman_moore1Normalizar(seed) {
+                return seed / this.dosE31menos1Double;
+            }
+        }
+
+        class BelZab {
+            constructor(dimension, alfa, beta, gamma) {
+                this.dimension = dimension;
+                this.alfa = alfa;
+                this.beta = beta;
+                this.gamma = gamma;
+
+                // Initialize arrays using typed arrays for performance
+                const size = dimension * dimension;
+                this.size = size;
+                this.a = [new Float32Array(size), new Float32Array(size)];
+                this.b = [new Float32Array(size), new Float32Array(size)];
+                this.c = [new Float32Array(size), new Float32Array(size)];
+
+                this.p = 0;
+                this.q = 1;
+
+                const r = new RandomGenerator();
+                let seed = 1;
+
+                for (let i = 0; i < size; i++) {
+                    seed = r.fishman_moore1(seed);
+                    this.a[this.p][i] = r.fishman_moore1Normalizar(seed);
+                    seed = r.fishman_moore1(seed);
+                    this.b[this.p][i] = r.fishman_moore1Normalizar(seed);
+                    seed = r.fishman_moore1(seed);
+                    this.c[this.p][i] = r.fishman_moore1Normalizar(seed);
+                }
+            }
+
+            updateParameters(alfa, beta, gamma) {
+                this.alfa = alfa;
+                this.beta = beta;
+                this.gamma = gamma;
+            }
+
+            nextGen() {
+                const { dimension, alfa, beta, gamma, p, q } = this;
+                const a_p = this.a[p];
+                const b_p = this.b[p];
+                const c_p = this.c[p];
+                const a_q = this.a[q];
+                const b_q = this.b[q];
+                const c_q = this.c[q];
+
+                for (let x = 0; x < dimension; x++) {
+                    for (let y = 0; y < dimension; y++) {
+                        let c_a = 0.0,
+                            c_b = 0.0,
+                            c_c = 0.0;
+                        for (let i = x - 1; i <= x + 1; i++) {
+                            const ii = (i + dimension) % dimension;
+                            for (let j = y - 1; j <= y + 1; j++) {
+                                const jj = (j + dimension) % dimension;
+                                const idx = ii * dimension + jj;
+                                c_a += a_p[idx];
+                                c_b += b_p[idx];
+                                c_c += c_p[idx];
+                            }
+                        }
+                        c_a /= 9.0;
+                        c_b /= 9.0;
+                        c_c /= 9.0;
+
+                        const idx = x * dimension + y;
+
+                        a_q[idx] = Math.min(
+                            1.0,
+                            Math.max(0.0, c_a + c_a * (alfa * c_b - gamma * c_c))
+                        );
+                        b_q[idx] = Math.min(
+                            1.0,
+                            Math.max(0.0, c_b + c_b * (beta * c_c - alfa * c_a))
+                        );
+                        c_q[idx] = Math.min(
+                            1.0,
+                            Math.max(0.0, c_c + c_c * (gamma * c_a - beta * c_b))
+                        );
+                    }
+                }
+                this.p = q;
+                this.q = p;
+            }
+        }
+
+        (function () {
+            const startBtn = document.getElementById('startBtn');
+            const stopBtn = document.getElementById('stopBtn');
+            const dimensionInput = document.getElementById('dimension');
+            const alfaInput = document.getElementById('alfa');
+            const betaInput = document.getElementById('beta');
+            const gammaInput = document.getElementById('gamma');
+            const brushSizeInput = document.getElementById('brushSize');
+            const speedInput = document.getElementById('speed');
+            const speedValueDisplay = document.getElementById('speedValue');
+            const colorInputA = document.getElementById('colorInputA');
+            const colorInputB = document.getElementById('colorInputB');
+            const colorInputC = document.getElementById('colorInputC');
+
+            const colorOptions = document.querySelectorAll('.colorOption');
+            let selectedColor = 'a';
+
+            let animationFrameId;
+            let simulation;
+            let canvas;
+            let ctx;
+            let dimension;
+            let isRunning = false;
+            let isDrawing = false;
+            let lastTime = 0;
+            let accumulatedTime = 0;
+
+            function hexToRgb(hex) {
+                let c;
+                if(/^#([A-Fa-f0-9]{6})$/.test(hex)) {
+                    c = hex.substring(1).split('');
+                    return {
+                        r: parseInt(c[0] + c[1], 16),
+                        g: parseInt(c[2] + c[3], 16),
+                        b: parseInt(c[4] + c[5], 16)
+                    };
+                } else {
+                    return { r: 0, g: 0, b: 0 };
+                }
+            }
+
+            function initSimulation() {
+                dimension = parseInt(dimensionInput.value);
+                const alfa = parseFloat(alfaInput.value);
+                const beta = parseFloat(betaInput.value);
+                const gamma = parseFloat(gammaInput.value);
+
+                simulation = new BelZab(dimension, alfa, beta, gamma);
+
+                // Set up canvas
+                canvas = document.getElementById('canvas');
+                canvas.width = dimension;
+                canvas.height = dimension;
+                ctx = canvas.getContext('2d');
+
+                canvas.style.position = 'absolute';
+                canvas.style.top = '0';
+                canvas.style.left = '0';
+
+                canvas.style.cursor = 'crosshair';
+
+                // Clear any existing event listeners
+                canvas.onmousedown = null;
+                canvas.onmousemove = null;
+                canvas.onmouseup = null;
+                canvas.onmouseleave = null;
+
+                // Add event listeners for drawing
+                canvas.addEventListener('mousedown', onMouseDown);
+                canvas.addEventListener('mousemove', onMouseMove);
+                canvas.addEventListener('mouseup', onMouseUp);
+                canvas.addEventListener('mouseleave', onMouseUp);
+
+                // Update color pickers
+                updateColorOptions();
+
+                updateCanvas();
+
+                // Reset timing variables
+                lastTime = 0;
+                accumulatedTime = 0;
+            }
+
+            function updateCanvas() {
+                const p = simulation.p;
+                const size = simulation.size;
+                const a = simulation.a[p];
+                const b = simulation.b[p];
+                const c = simulation.c[p];
+
+                const imageData = ctx.createImageData(dimension, dimension);
+                const data = imageData.data;
+
+                const colorA = hexToRgb(colorInputA.value);
+                const colorB = hexToRgb(colorInputB.value);
+                const colorC = hexToRgb(colorInputC.value);
+
+                for (let i = 0; i < size; i++) {
+                    const idx = i * 4;
+                    data[idx] = a[i] * colorA.r + b[i] * colorB.r + c[i] * colorC.r;
+                    data[idx + 1] = a[i] * colorA.g + b[i] * colorB.g + c[i] * colorC.g;
+                    data[idx + 2] = a[i] * colorA.b + b[i] * colorB.b + c[i] * colorC.b;
+                    data[idx + 3] = 255;
+                }
+
+                ctx.putImageData(imageData, 0, 0);
+            }
+
+            function animate(timestamp) {
+                if (!isRunning) return;
+
+                if (!lastTime) {
+                    lastTime = timestamp;
+                }
+                const delta = timestamp - lastTime;
+                lastTime = timestamp;
+
+                let speedFactor = parseFloat(speedInput.value);
+                accumulatedTime += delta * speedFactor;
+
+                const simulationInterval = 16.67;
+
+                const alfa = parseFloat(alfaInput.value);
+                const beta = parseFloat(betaInput.value);
+                const gamma = parseFloat(gammaInput.value);
+                simulation.updateParameters(alfa, beta, gamma);
+
+                while (accumulatedTime >= simulationInterval) {
+                    simulation.nextGen();
+                    accumulatedTime -= simulationInterval;
+                }
+
+                updateCanvas();
+                animationFrameId = requestAnimationFrame(animate);
+            }
+
+            startBtn.addEventListener('click', () => {
+                if (isRunning) return;
+                isRunning = true;
+                initSimulation();
+                animationFrameId = requestAnimationFrame(animate);
+            });
+
+            stopBtn.addEventListener('click', () => {
+                isRunning = false;
+                cancelAnimationFrame(animationFrameId);
+            });
+
+            // Handle color selection
+            colorOptions.forEach((option) => {
+                option.addEventListener('click', () => {
+                    colorOptions.forEach((opt) => opt.classList.remove('selected'));
+                    option.classList.add('selected');
+                    selectedColor = option.id.slice(-1).toLowerCase();
+                });
+            });
+
+            function getMousePos(event) {
+                const rect = canvas.getBoundingClientRect();
+                const scaleX = canvas.width / rect.width;
+                const scaleY = canvas.height / rect.height;
+                return {
+                    x: Math.floor((event.clientX - rect.left) * scaleX),
+                    y: Math.floor((event.clientY - rect.top) * scaleY),
+                };
+            }
+
+            function modifyCell(x, y) {
+                if (!isRunning) return;
+                const brushSize = parseInt(brushSizeInput.value);
+                const halfBrush = Math.floor(brushSize / 2);
+                const p = simulation.p;
+                for (let i = -halfBrush; i <= halfBrush; i++) {
+                    for (let j = -halfBrush; j <= halfBrush; j++) {
+                        const xi = x + i;
+                        const yj = y + j;
+                        if (xi >= 0 && xi < dimension && yj >= 0 && yj < dimension) {
+                            const idx = yj * dimension + xi;
+                            switch (selectedColor) {
+                                case 'a':
+                                    simulation.a[p][idx] = 1.0;
+                                    break;
+                                case 'b':
+                                    simulation.b[p][idx] = 1.0;
+                                    break;
+                                case 'c':
+                                    simulation.c[p][idx] = 1.0;
+                                    break;
+                            }
+                            const colorA = hexToRgb(colorInputA.value);
+                            const colorB = hexToRgb(colorInputB.value);
+                            const colorC = hexToRgb(colorInputC.value);
+
+                            const aVal = simulation.a[p][idx];
+                            const bVal = simulation.b[p][idx];
+                            const cVal = simulation.c[p][idx];
+
+                            const r = aVal * colorA.r + bVal * colorB.r + cVal * colorC.r;
+                            const g = aVal * colorA.g + bVal * colorB.g + cVal * colorC.g;
+                            const b = aVal * colorA.b + bVal * colorB.b + cVal * colorC.b;
+
+                            ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+                            ctx.fillRect(xi, yj, 1, 1);
+                        }
+                    }
+                }
+            }
+
+            function onMouseDown(event) {
+                if (!isRunning) return;
+                isDrawing = true;
+                const pos = getMousePos(event);
+                modifyCell(pos.x, pos.y);
+            }
+
+            function onMouseMove(event) {
+                if (!isDrawing || !isRunning) return;
+                const pos = getMousePos(event);
+                modifyCell(pos.x, pos.y);
+            }
+
+            function onMouseUp() {
+                isDrawing = false;
+            }
+
+            // Update speed label when slider changes
+            speedInput.addEventListener('input', () => {
+                speedValueDisplay.textContent = speedInput.value;
+            });
+
+            // Update colors when color inputs change
+            function updateColorOptions() {
+                document.getElementById('colorA').style.backgroundColor = colorInputA.value;
+                document.getElementById('colorB').style.backgroundColor = colorInputB.value;
+                document.getElementById('colorC').style.backgroundColor = colorInputC.value;
+            }
+
+            colorInputA.addEventListener('input', updateColorOptions);
+            colorInputB.addEventListener('input', updateColorOptions);
+            colorInputC.addEventListener('input', updateColorOptions);
+
+            // Initialize default selection and colors
+            const colorAElement = document.getElementById('colorA');
+            if (colorAElement) {
+                colorAElement.classList.add('selected');
+            } else {
+                console.error("Element with ID 'colorA' not found.");
+            }
+
+            updateColorOptions();
+        })();
+    </script>
+</body>
+</html>

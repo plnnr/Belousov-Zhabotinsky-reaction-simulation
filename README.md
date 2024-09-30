@@ -1,12 +1,9 @@
 # Belousov-Zhabotinsky-reaction-simulation
 
-To execute the simulation we just need to:
+This code is a python and javascript implementation of the original code written in Java. To run, open index.html in your browser. You can view a live demo [here](https://plnnr.github.io/Belousov-Zhabotinsky-reaction-simulation/).
 
-  *javac Simulatore.java*
-  
-  *java Simulatore*
-  
-And the GUI will display. If we want to select the dimension of the pane where the simulation will be done we just need to enter a number in the box 'dimension', if we want to create the initial pane push 'crear simulacion', to run it 'iniciar simulacion' and to stop it 'fin'.
+The black textbox is drag-able. It doesnt work well on a mobile device right now. 
 
-![Simulation example](https://github.com/coloal/Belousov-Zhabotinsky-reaction-simulation/blob/master/exampleBelZab.gif)
+
+
 
